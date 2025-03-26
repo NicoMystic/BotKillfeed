@@ -186,73 +186,135 @@ class KillboardManager:
             print(f"Erreur lors de la réinitialisation des scores: {e}")
             return False
     
+    # Remplacez la fonction process_kill_event (vers la ligne 179) par celle-ci:
+import sqlite3
+import discord
+from discord.ext import commands
+import re
+from datetime import datetime 
+
+# Constantes pour les points
+POINTS_SURVIVANT = 5
+POINTS_AI = 4
+POINTS_ANIMAL = 2
+POINTS_ZOMBIE = 1
+
+class KillboardManager:
+    def __init__(self, db_name='player_scores.db'):
+        self.db_name = db_name
+        self._init_database()
+
+    def _init_database(self):
+        try:
+            conn = sqlite3.connect(self.db_name)
+            cursor = conn.cursor()
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS scores (
+                player_name TEXT PRIMARY KEY,
+                total_score INTEGER DEFAULT 0,
+                survivor_kills INTEGER DEFAULT 0,
+                ai_kills INTEGER DEFAULT 0,
+                animal_kills INTEGER DEFAULT 0,
+                zombie_kills INTEGER DEFAULT 0
+            )
+            ''')
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"Erreur lors de l'initialisation de la base de données: {e}")
+
+    def update_player_score(self, player_name, kill_type):
+        try:
+            conn = sqlite3.connect(self.db_name)
+            cursor = conn.cursor()
+            points = 0
+            column = ''
+            if kill_type == 'survivor':
+                points = POINTS_SURVIVANT
+                column = 'survivor_kills'
+            elif kill_type == 'ai':
+                points = POINTS_AI
+                column = 'ai_kills'
+            elif kill_type == 'animal':
+                points = POINTS_ANIMAL
+                column = 'animal_kills'
+            elif kill_type == 'zombie':
+                points = POINTS_ZOMBIE
+                column = 'zombie_kills'
+            else:
+                conn.close()
+                return False
+            cursor.execute('SELECT * FROM scores WHERE player_name = ?', (player_name,))
+            row = cursor.fetchone()
+            if row:
+                cursor.execute(f'UPDATE scores SET total_score = total_score + ?, {column} = {column} + 1 WHERE player_name = ?', 
+                              (points, player_name))
+            else:
+                default_values = {'survivor_kills': 0, 'ai_kills': 0, 'animal_kills': 0, 'zombie_kills': 0}
+                default_values[column] = 1
+                cursor.execute('INSERT INTO scores (player_name, total_score, survivor_kills, ai_kills, animal_kills, zombie_kills) VALUES (?, ?, ?, ?, ?, ?)', 
+                              (player_name, points, 
+                               default_values['survivor_kills'],
+                               default_values['ai_kills'], 
+                               default_values['animal_kills'],
+                               default_values['zombie_kills']))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Erreur lors de la mise à jour des scores: {e}")
+            return False
+
     def process_kill_event(self, event):
-        """Traiter un événement de kill pour mettre à jour les scores"""
         print(f"Processing kill event: {event}")
         try:
-            killer = event.get('killer', '')
-            player = event.get('player', '')
-            weapon = event.get('weapon', '')
-        
-            print(f"Kill details - Killer: {killer}, Victim: {player}, Weapon: {weapon}")
-        
-            # Vérifier si c'est un joueur qui a tué (Player "...")
-            if 'Player "' in killer:
-                print(f"Player kill detected: {killer}")
-            
-                # Extraire le nom du joueur
+            if "event" in event:
+                event_type = event.get('event', '')
+                player_name = None
+                if "player" in event and isinstance(event["player"], dict):
+                    player_name = event["player"].get("name")
+                if not player_name:
+                    killer = event.get("data", {}).get("killer")
+                    if isinstance(killer, dict):
+                        player_name = killer.get("name")
+                if not player_name or player_name.lower() in ["self", "null", ""]:
+                    print("Aucun joueur valide trouvé dans l'événement LJSON")
+                    return False
+                if "ANIMAL_DEATH" in event_type:
+                    print(f"Animal kill detected by {player_name}")
+                    return self.update_player_score(player_name, 'animal')
+                elif "INFECTED_DEATH" in event_type:
+                    print(f"Zombie kill detected by {player_name}")
+                    return self.update_player_score(player_name, 'zombie')
+                elif "PLAYER_DEATH" in event_type:
+                    print(f"Player kill detected by {player_name}")
+                    return self.update_player_score(player_name, 'survivor')
+            event_type = event.get('type', '')
+            if event_type == 'kill':
+                killer = event.get('killer', '')
                 match = re.search(r'Player "([^"]+)"', killer)
                 if match:
                     player_name = match.group(1)
-                    print(f"Player name extracted: {player_name}")
-                
-                    # Déterminer le type de cible
-                    victim_type = 'unknown'
-                
-                    # Pour les joueurs
-                    if 'Player "' in player:
-                        victim_type = 'survivor'
-                        print("Victim is a survivor")
-                    # Pour les AI
-                    elif 'AI "' in player:
-                        victim_type = 'ai'
-                        print("Victim is an AI")
-                    # Pour les animaux (Wolf, Bear, etc.)
-                    elif any(animal in player for animal in ['Wolf', 'Bear', 'Animal']):
-                        victim_type = 'animal'
-                        print(f"Victim is an animal: {player}")
-                    # Pour les infectés/zombies
-                    elif any(zombie in player for zombie in ['Infected', 'Zombie']):
-                        victim_type = 'zombie'
-                        print(f"Victim is a zombie: {player}")
-                    else:
-                        # Essayer de déterminer par l'arme ou d'autres indices
-                        print(f"Trying to determine victim type from weapon: {weapon}")
-                        if weapon and any(animal in weapon for animal in ['Wolf', 'Bear']):
-                            victim_type = 'animal'
-                        elif weapon and any(zombie in weapon for zombie in ['Infected', 'Zombie']):
-                            victim_type = 'zombie'
-                
-                    print(f"Final victim type determined: {victim_type}")
-                
-                    # Mettre à jour le score du joueur
-                    if victim_type != 'unknown':
-                        result = self.update_player_score(player_name, victim_type)
-                        print(f"Score updated for {player_name}, type: {victim_type}, result: {result}")
-                        return result
-                    else:
-                        print(f"Unknown victim type: player={player}, weapon={weapon}")
-                else:
-                    print(f"Could not extract player name from: {killer}")
-            else:
-                print(f"Not a player kill: killer={killer}")
-    
+                    print(f"Player kill detected: {player_name} killed a survivor")
+                    return self.update_player_score(player_name, 'survivor')
+            elif event_type == 'suicide':
+                player = event.get('player', '')
+                print(f"Suicide detected for {player}")
+                return True
+            elif event_type == 'animal_kill':
+                player = event.get('player', '')
+                print(f"Animal kill detected by {player}")
+                return self.update_player_score(player, 'animal')
+            elif event_type == 'zombie_kill':
+                player = event.get('player', '')
+                print(f"Zombie kill detected by {player}")
+                return self.update_player_score(player, 'zombie')
         except Exception as e:
-            print(f"Erreur lors du traitement de l'événement de kill: {e}")
+            print(f"Error processing kill event: {e}")
             import traceback
             traceback.print_exc()
-    
         return False
+
 # Fonctions pour intégrer avec le bot Discord
 def register_commands(bot):
     """Enregistrer les commandes du killboard sur le bot"""
@@ -261,68 +323,67 @@ def register_commands(bot):
     
     @bot.command()
     async def killboard(ctx, limit: int = 10):
-        """Affiche un tableau des scores plus compact"""
+        """Affiche un tableau des scores avec un champion mis en valeur"""
         try:
             top_players = killboard_manager.get_top_players(limit)
-            
+    
             if not top_players:
                 await ctx.send("❌ Aucun score enregistré pour le moment.")
                 return
-            
-            # Créer un embed avec une palette de couleurs sombres et apocalyptiques
+
             embed = discord.Embed(
                 title="☢️ TABLEAU DES SCORES ☢️",
                 description="*Les chasseurs les plus mortels de la Zone*",
                 color=discord.Color.from_rgb(30, 30, 30)
             )
-            
-            # Barème des points avec une présentation plus compacte
+
             barème = (
-                "```\n"
                 "◉ SURVIVANT +5 | ◉ AI +4\n"
                 "◉ ANIMAL +2   | ◉ ZOMBIE +1\n"
-                "```"
             )
             embed.add_field(name="💀 SYSTÈME DE POINTS", value=barème, inline=False)
-            
-            # Table avec un style plus compact
-            scores_text = "```\n"
-            # En-tête du tableau plus compact
-            scores_text += "┌───┬──────────┬─────┬──┬──┬──┬──┐\n"
-            scores_text += "│ # │ CHASSEUR │ SCR │👤│🤖│🐺│🧟│\n"
-            scores_text += "├───┼──────────┼─────┼──┼──┼──┼──┤\n"
-            
-            # Corps du tableau avec données des joueurs
+
+            # ⚡ Champion de la Zone
+            top_player = top_players[0]
+            champion_name = top_player[0].upper()
+            champion_points = top_player[1]
+            embed.add_field(
+                name="👑 CHAMPION DE LA ZONE",
+                value=f"🔥 **{champion_name}** avec **{champion_points} points** !",
+                inline=False
+            )
+
+        # Tableau propre avec padding
+            scores_text = "`#  | CHASSEUR       | SCR  | 👤   | 🤖   | 🐺   | 🧟   `\n"
+
             for i, (player, total, surv, ai, animal, zombie) in enumerate(top_players, 1):
-                # Emoji pour les 3 premiers
-                rank = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i:2}"
-                
-                # Tronquer le nom pour un affichage plus compact
-                player_name = (player[:8] + "..") if len(player) > 10 else player.ljust(10)
-                
-                # Ligne de données
-                scores_text += f"│{rank}│{player_name}│{total:4}│{surv:2}│{ai:2}│{animal:2}│{zombie:2}│\n"
-            
-            # Pied du tableau
-            scores_text += "└───┴──────────┴─────┴──┴──┴──┴──┘\n"
-            scores_text += "```"
-            
+                rank = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i:<2}"
+
+                name_display = player.upper() if i == 1 else player
+                name_display = (name_display[:14] + "..") if len(name_display) > 16 else name_display
+                name_display = name_display.ljust(14)
+
+                scores_text += (
+                    f"`{rank} | {name_display} | {str(total).ljust(4)} | "
+                    f"{str(surv).ljust(4)} | {str(ai).ljust(4)} | {str(animal).ljust(4)} | {str(zombie).ljust(4)}`\n"
+                )
+
             embed.add_field(name="🏆 L'ÉLITE DES SURVIVANTS", value=scores_text, inline=False)
-            
-            # Légende plus compacte
+
             legend = "**👤 Survivants | 🤖 IA | 🐺 Animaux | 🧟 Zombies**"
             embed.add_field(name="📊 LÉGENDE", value=legend, inline=False)
-            
-            # Footer avec la date
+
             current_time = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
             embed.set_footer(text=f"MISE À JOUR: {current_time} | ZONE DE RADIATION ACTIVE")
-            
-            # Image thématique
             embed.set_thumbnail(url="https://dayzaide.fr/Images_Dayz/BlackMarket.png")
-            
+
             await ctx.send(embed=embed)
+
         except Exception as e:
             await ctx.send(f"❌ Erreur lors de la récupération du tableau des scores: `{str(e)}`")
+
+
+
     
     @bot.command()
     @commands.has_permissions(administrator=True)
