@@ -212,6 +212,28 @@ async def process_new_events():
                 await events_channel.send(embed=embed)
                 save_player_activity_log(f"Décès: {event['player']} de {event['cause']} à {event['timestamp']}")
                 
+            elif event['type'] == 'animal_kill':
+                embed = discord.Embed(
+                    title="🐺 Animal tué",
+                    description=f"**{event['player']}** a tué un **animal**",
+                    color=discord.Color.green()
+                )
+                embed.set_footer(text=f"{event['timestamp']}")
+                await events_channel.send(embed=embed)
+                killboard_manager.process_kill_event(event)
+
+            elif event['type'] == 'zombie_kill':
+                embed = discord.Embed(
+                title="🧟 Zombie tué",
+                description=f"**{event['player']}** a tué un **zombie**",
+                color=discord.Color.purple()
+                )
+                embed.set_footer(text=f"{event['timestamp']}")
+                await events_channel.send(embed=embed)
+                killboard_manager.process_kill_event(event)
+
+
+
             elif event['type'] == 'hit' and 'player' in event and 'attacker' in event:
                 # Optionnel: notifications pour les hits (peut générer beaucoup de messages)
                 if 'Player' in event['attacker']:  # Seulement les hits PvP
@@ -283,9 +305,9 @@ async def check_server():
 
     view = discord.ui.View()
     view.add_item(discord.ui.Button(label="🔁 Rafraîchir", style=discord.ButtonStyle.green, custom_id="refresh_status"))
-    view.add_item(discord.ui.Button(label="🕒 Redémarrages", style=discord.ButtonStyle.blurple, custom_id="restart_list"))
-    view.add_item(discord.ui.Button(label="🔔 Activer Alertes", style=discord.ButtonStyle.primary, custom_id="notif_on"))
-    view.add_item(discord.ui.Button(label="🔕 Désactiver Alertes", style=discord.ButtonStyle.secondary, custom_id="notif_off"))
+    view.add_item(discord.ui.Button(label="🕒 Restart", style=discord.ButtonStyle.blurple, custom_id="restart_list"))
+    view.add_item(discord.ui.Button(label="🔔 Activer", style=discord.ButtonStyle.primary, custom_id="notif_on"))
+    view.add_item(discord.ui.Button(label="🔕 Désactiver", style=discord.ButtonStyle.secondary, custom_id="notif_off"))
 
     if last_message:
         try:
@@ -298,7 +320,7 @@ async def check_server():
 
     if last_status is not None and last_status != status:
         if not status and events_channel:
-            await events_channel.send("⚠️ **ALERTE** : Le serveur est **HORS-LIGNE** !")
+            await events_channel.send("⚠️ **ALERTE** : **Mise à jour** du serveur !")
             for user_id in notifications_enabled:
                 try:
                     user = await bot.fetch_user(user_id)
