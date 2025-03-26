@@ -17,7 +17,7 @@ def find_latest_ljson_log(log_dir="$profile:"):
     Returns:
         str: Chemin du fichier le plus récent, ou None si aucun trouvé
     """
-    real_dir = log_dir.replace("$profile:", "")  # Remplacer par le vrai chemin si nécessaire
+    real_dir = log_dir.replace("$profile:", "/193.25.252.91_2330/ServerProfile/")  # Remplacer par le vrai chemin si nécessaire
     log_pattern = os.path.join(real_dir, "Mystic_SourceLogs_*.ljson")
     log_files = glob.glob(log_pattern)
     
